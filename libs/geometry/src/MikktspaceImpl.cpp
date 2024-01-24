@@ -81,7 +81,7 @@ void MikktspaceImpl::setTSpaceBasic(SMikkTSpaceContext const* context, float con
     // TODO: packTangentFrame actually changes the orientation of b.
     quatf const quat = mat3f::packTangentFrame({t, b, n}, sizeof(int32_t));
 
-    auto output = wrapper->mOutputData;
+    auto& output = wrapper->mOutputData;
     auto const& EMPTY_ELEMENT = wrapper->EMPTY_ELEMENT;
 
     size_t const outputCurSize = output.size();
@@ -155,7 +155,6 @@ void MikktspaceImpl::run(TangentSpaceMeshOutput* output) noexcept {
     genTangSpaceDefault(&context);
 
     size_t oVertexCount = mOutputData.size() / mOutputElementSize;
-
     std::vector<unsigned int> remap(oVertexCount);
     size_t vertexCount = meshopt_generateVertexRemap(remap.data(), NULL, remap.size(),
             mOutputData.data(), oVertexCount, mOutputElementSize);
