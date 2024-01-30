@@ -39,8 +39,26 @@
 
 #include <algorithm>
 
+#include <chrono>
+
 namespace filament {
 namespace backend {
+
+namespace {
+using clock_type = typename std::conditional<
+  std::chrono::high_resolution_clock::is_steady,
+  std::chrono::high_resolution_clock,
+  std::chrono::steady_clock>::type;
+
+//std::atomic<uint32_t> ncount = 0;
+double drawTotal = 0;
+double beginRenderPassTotal = 0;
+double endRenderPassTotal = 0;
+
+double elapsed( std::chrono::time_point<clock_type> const& start_time) {
+        return std::chrono::duration_cast<std::chrono::microseconds>(clock_type::now() - start_time).count() / 1000.0;
+}
+}
 
 Driver* MetalDriverFactory::create(MetalPlatform* const platform, const Platform::DriverConfig& driverConfig) {
     return MetalDriver::create(platform, driverConfig);
@@ -170,6 +188,11 @@ void MetalDriver::tick(int) {
 }
 
 void MetalDriver::beginFrame(int64_t monotonic_clock_ns, uint32_t frameId) {
+    // Do nothing.
+    drawTotal = 0;
+    beginRenderPassTotal = 0;
+    endRenderPassTotal = 0;
+
 #if defined(FILAMENT_METAL_PROFILING)
     os_signpost_interval_begin(mContext->log, mContext->signpostId, "Frame encoding", "%{public}d", frameId);
 #endif
@@ -227,6 +250,9 @@ void MetalDriver::endFrame(uint32_t frameId) {
 #if defined(FILAMENT_METAL_PROFILING)
     os_signpost_interval_end(mContext->log, mContext->signpostId, "Frame encoding");
 #endif
+
+    utils::slog.e <<"draw=" << drawTotal <<" beginRender=" << beginRenderPassTotal <<
+            " enedRender=" << endRenderPassTotal << utils::io::endl;
 }
 
 void MetalDriver::flush(int) {
@@ -967,6 +993,7 @@ void MetalDriver::compilePrograms(CompilerPriorityQueue priority,
 
 void MetalDriver::beginRenderPass(Handle<HwRenderTarget> rth,
         const RenderPassParams& params) {
+    auto start = clock_type::now();
 
 #if defined(FILAMENT_METAL_PROFILING)
     const char* renderPassName = "Unknown";
@@ -1009,11 +1036,14 @@ void MetalDriver::beginRenderPass(Handle<HwRenderTarget> rth,
     mContext->currentPolygonOffset = {0.0f, 0.0f};
 
     mContext->finalizedSamplerGroups.clear();
+
+    beginRenderPassTotal += elapsed(start);
 }
 
 void MetalDriver::nextSubpass(int dummy) {}
 
 void MetalDriver::endRenderPass(int dummy) {
+    auto start = clock_type::now();
 #if defined(FILAMENT_METAL_PROFILING)
     os_signpost_interval_end(mContext->log, OS_SIGNPOST_ID_EXCLUSIVE, "Render pass");
 #endif
@@ -1023,6 +1053,8 @@ void MetalDriver::endRenderPass(int dummy) {
     // Command encoders are one time use. Set it to nil to release the encoder and ensure we don't
     // accidentally use it again.
     mContext->currentRenderPassEncoder = nil;
+
+    endRenderPassTotal += elapsed(start);
 }
 
 void MetalDriver::setRenderPrimitiveBuffer(Handle<HwRenderPrimitive> rph,
@@ -1544,6 +1576,7 @@ void MetalDriver::finalizeSamplerGroup(MetalSamplerGroup* samplerGroup) {
 }
 
 void MetalDriver::draw(PipelineState ps, Handle<HwRenderPrimitive> rph, uint32_t instanceCount) {
+    auto start = clock_type::now();
     ASSERT_PRECONDITION(mContext->currentRenderPassEncoder != nullptr,
             "Attempted to draw without a valid command encoder.");
     auto primitive = handle_cast<MetalRenderPrimitive>(rph);
@@ -1793,6 +1826,7 @@ void MetalDriver::draw(PipelineState ps, Handle<HwRenderPrimitive> rph, uint32_t
                                                   indexBuffer:metalIndexBuffer
                                             indexBufferOffset:primitive->offset
                                                 instanceCount:instanceCount];
+     drawTotal += elapsed(start);
 }
 
 void MetalDriver::dispatchCompute(Handle<HwProgram> program, math::uint3 workGroupCount) {

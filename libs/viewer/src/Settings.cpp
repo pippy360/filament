@@ -561,6 +561,7 @@ int parse(jsmntok_t const* tokens, int i, const char* jsonChunk, Settings* out) 
 }
 
 void applySettings(Engine* engine, const ViewSettings& settings, View* dest) {
+//    utils::slog.e <<"apply settings " << utils::io::endl;
     dest->setAntiAliasing(settings.antiAliasing);
     dest->setTemporalAntiAliasingOptions(settings.taa);
     dest->setMultiSampleAntiAliasingOptions(settings.msaa);

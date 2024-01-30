@@ -35,6 +35,8 @@
 #include <set>  // For VulkanDriver::debugCommandBegin
 #endif
 
+#include <chrono>
+
 using namespace bluevk;
 
 using utils::FixedCapacityVector;
@@ -137,6 +139,20 @@ VKAPI_ATTR VkBool32 VKAPI_CALL debugUtilsCallback(VkDebugUtilsMessageSeverityFla
     return VK_FALSE;
 }
 #endif // FVK_EANBLED(FVK_DEBUG_VALIDATION)
+
+using clock_type = typename std::conditional<
+  std::chrono::high_resolution_clock::is_steady,
+  std::chrono::high_resolution_clock,
+  std::chrono::steady_clock>::type;
+
+//std::atomic<uint32_t> ncount = 0;
+double drawTotal = 0;
+double beginRenderPassTotal = 0;
+double endRenderPassTotal = 0;
+
+double elapsed( std::chrono::time_point<clock_type> const& start_time) {
+        return std::chrono::duration_cast<std::chrono::microseconds>(clock_type::now() - start_time).count() / 1000.0;
+}
 
 } // anonymous namespace
 
@@ -278,6 +294,9 @@ void VulkanDriver::collectGarbage() {
 }
 void VulkanDriver::beginFrame(int64_t monotonic_clock_ns, uint32_t frameId) {
     // Do nothing.
+    drawTotal = 0;
+    beginRenderPassTotal = 0;
+    endRenderPassTotal = 0;
 }
 
 void VulkanDriver::setFrameScheduledCallback(Handle<HwSwapChain> sch,
@@ -297,6 +316,9 @@ void VulkanDriver::endFrame(uint32_t frameId) {
     mCommands->flush();
     collectGarbage();
     FVK_SYSTRACE_END();
+
+    utils::slog.e <<"draw=" << drawTotal <<" beginRender=" << beginRenderPassTotal <<
+            " enedRender=" << endRenderPassTotal << utils::io::endl;
 }
 
 void VulkanDriver::flush(int) {
@@ -1018,6 +1040,8 @@ void VulkanDriver::compilePrograms(CompilerPriorityQueue priority,
 }
 
 void VulkanDriver::beginRenderPass(Handle<HwRenderTarget> rth, const RenderPassParams& params) {
+    auto start = clock_type::now();
+
     FVK_SYSTRACE_CONTEXT();
     FVK_SYSTRACE_START("beginRenderPass");
 
@@ -1268,9 +1292,15 @@ void VulkanDriver::beginRenderPass(Handle<HwRenderTarget> rth, const RenderPassP
         .currentSubpass = 0,
     };
     FVK_SYSTRACE_END();
+
+    beginRenderPassTotal += elapsed(start);
+    
+    //utils::slog.e <<"begin renderpass elapsed=" << elapsed(start) <<"ms" << utils::io::endl;
 }
 
 void VulkanDriver::endRenderPass(int) {
+    auto start = clock_type::now();
+    
     FVK_SYSTRACE_CONTEXT();
     FVK_SYSTRACE_START("endRenderPass");
 
@@ -1317,6 +1347,8 @@ void VulkanDriver::endRenderPass(int) {
     mCurrentRenderPass.renderTarget = nullptr;
     mCurrentRenderPass.renderPass = VK_NULL_HANDLE;
     FVK_SYSTRACE_END();
+
+    endRenderPassTotal += elapsed(start);
 }
 
 void VulkanDriver::nextSubpass(int) {
@@ -1603,6 +1635,10 @@ void VulkanDriver::blitDEPRECATED(TargetBufferFlags buffers,
 
 void VulkanDriver::draw(PipelineState pipelineState, Handle<HwRenderPrimitive> rph,
         const uint32_t instanceCount) {
+
+//    auto start = std::chrono::high_resolution_clock::now();
+    auto start = clock_type::now();
+
     FVK_SYSTRACE_CONTEXT();
     FVK_SYSTRACE_START("draw");
 
@@ -1788,6 +1824,9 @@ void VulkanDriver::draw(PipelineState pipelineState, Handle<HwRenderPrimitive> r
 
     vkCmdDrawIndexed(cmdbuffer, indexCount, instanceCount, firstIndex, vertexOffset, firstInstId);
     FVK_SYSTRACE_END();
+    drawTotal += elapsed(start);
+
+//    utils::slog.e <<"draw elapsed=" << elapsed(start) <<"ms" << utils::io::endl;
 }
 
 void VulkanDriver::dispatchCompute(Handle<HwProgram> program, math::uint3 workGroupCount) {

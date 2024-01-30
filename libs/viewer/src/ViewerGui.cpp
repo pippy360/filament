@@ -746,7 +746,13 @@ void ViewerGui::updateUserInterface() {
     if (ImGui::CollapsingHeader("View")) {
         ImGui::Indent();
 
+        bool oldPostprocessing = mSettings.view.postProcessingEnabled;
+
         ImGui::Checkbox("Post-processing", &mSettings.view.postProcessingEnabled);
+
+        if (oldPostprocessing != mSettings.view.postProcessingEnabled) {
+            utils::slog.e <<"post processing is " << (mSettings.view.postProcessingEnabled ? "on" : "off") << utils::io::endl;
+        }
         ImGui::Indent();
             bool dither = mSettings.view.dithering == Dithering::TEMPORAL;
             ImGui::Checkbox("Dithering", &dither);

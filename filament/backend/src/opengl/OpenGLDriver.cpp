@@ -65,10 +65,30 @@
 #   define DEBUG_MARKER()
 #endif
 
+#include <chrono>
+
 using namespace filament::math;
 using namespace utils;
 
 namespace filament::backend {
+
+namespace {
+using clock_type = typename std::conditional<
+  std::chrono::high_resolution_clock::is_steady,
+  std::chrono::high_resolution_clock,
+  std::chrono::steady_clock>::type;
+
+//std::atomic<uint32_t> ncount = 0;
+double drawTotal = 0;
+double beginRenderPassTotal = 0;
+double endRenderPassTotal = 0;
+
+double elapsed( std::chrono::time_point<clock_type> const& start_time) {
+        return std::chrono::duration_cast<std::chrono::microseconds>(clock_type::now() - start_time).count() / 1000.0;
+}
+
+
+}
 
 Driver* OpenGLDriverFactory::create(
         OpenGLPlatform* const platform,
@@ -2644,6 +2664,7 @@ void OpenGLDriver::compilePrograms(CompilerPriorityQueue priority,
 
 void OpenGLDriver::beginRenderPass(Handle<HwRenderTarget> rth,
         const RenderPassParams& params) {
+    auto start = clock_type::now();    
     DEBUG_MARKER()
 
     getShaderCompilerService().tick();
@@ -2717,9 +2738,12 @@ void OpenGLDriver::beginRenderPass(Handle<HwRenderTarget> rth,
     clearWithRasterPipe(discardFlags & ~clearFlags,
             { 1, 0, 0, 1 }, 1.0, 0);
 #endif
+
+    beginRenderPassTotal += elapsed(start);    
 }
 
 void OpenGLDriver::endRenderPass(int) {
+    auto start = clock_type::now();    
     DEBUG_MARKER()
     auto& gl = mContext;
 
@@ -2776,6 +2800,8 @@ void OpenGLDriver::endRenderPass(int) {
 #endif
 
     mRenderPassTarget.clear();
+
+    endRenderPassTotal += elapsed(start);
 }
 
 
@@ -3283,6 +3309,11 @@ void OpenGLDriver::tick(int) {
 void OpenGLDriver::beginFrame(
         UTILS_UNUSED int64_t monotonic_clock_ns,
         UTILS_UNUSED uint32_t frameId) {
+    // Do nothing.
+    drawTotal = 0;
+    beginRenderPassTotal = 0;
+    endRenderPassTotal = 0;
+    
     DEBUG_MARKER()
     auto& gl = mContext;
     insertEventMarker("beginFrame");
@@ -3334,6 +3365,11 @@ void OpenGLDriver::endFrame(UTILS_UNUSED uint32_t frameId) {
     //SYSTRACE_NAME("glFinish");
     //glFinish();
     insertEventMarker("endFrame");
+
+
+    utils::slog.e <<"draw=" << drawTotal <<" beginRender=" << beginRenderPassTotal <<
+            " enedRender=" << endRenderPassTotal << utils::io::endl;
+    
 }
 
 void OpenGLDriver::flush(int) {
@@ -3685,6 +3721,8 @@ void OpenGLDriver::updateTextureLodRange(GLTexture* texture, int8_t targetLevel)
 }
 
 void OpenGLDriver::draw(PipelineState state, Handle<HwRenderPrimitive> rph, uint32_t instanceCount) {
+    auto start = clock_type::now();
+    
     DEBUG_MARKER()
     auto& gl = mContext;
 
@@ -3738,6 +3776,8 @@ void OpenGLDriver::draw(PipelineState state, Handle<HwRenderPrimitive> rph, uint
 #else
     CHECK_GL_ERROR(utils::slog.e)
 #endif
+
+     drawTotal += elapsed(start);            
 }
 
 void OpenGLDriver::dispatchCompute(Handle<HwProgram> program, math::uint3 workGroupCount) {
