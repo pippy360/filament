@@ -39,11 +39,6 @@ public:
     // can use to repackage the vk handle.
     using OnRecycle = std::function<void(VulkanDescriptorSet*)>;
 
-    VulkanDescriptorSet(VulkanResourceAllocator* allocator, VkDescriptorSet rawSet,
-            VkDescriptorSetLayout layout, OnRecycle&& onRecycleFn);
-
-    ~VulkanDescriptorSet();
-
     static VulkanDescriptorSet* create(VulkanResourceAllocator* allocator, VkDescriptorSet rawSet,
             VkDescriptorSetLayout layout, OnRecycle&& onRecycleFn);
 
@@ -51,41 +46,61 @@ public:
     VulkanAcquireOnlyResourceManager resources;
 
     VkDescriptorSet const vkSet;
-    VkDescriptorSetLayout const layout;
 
 private:
     OnRecycle mOnRecycleFn;
+
+    VulkanDescriptorSet(VulkanResourceAllocator* allocator, VkDescriptorSet rawSet,
+            VkDescriptorSetLayout layout, OnRecycle&& onRecycleFn);
+
+    ~VulkanDescriptorSet();
+
+    template <size_t, size_t, size_t>
+    friend class HandleAllocator;
 };
 
 // Abstraction over the pool and the layout cache.
 class VulkanDescriptorSetManager {
 public:
-    using StageBitMask = uint32_t;
-    using UniformBufferBitmask = StageBitMask;
-    using SamplerBitmask = StageBitMask;
+    // UBO, samplers, and input attachment
+    static constexpr uint8_t DISTINCT_DESCRIPTOR_SET_COUNT = 3;
+    static constexpr uint8_t MAX_SUPPORTED_SHADER_STAGE = 2;// Vertex and fragment.
 
-    static constexpr uint8_t CONCURRENT_DESCRIPTOR_SET_COUNT = 2;// UBO and samplers
-    static constexpr uint8_t MAX_SUPPORTED_SHADER_STAGE = 2;     // Vertex and fragment.
+    // static constexpr uint8_t UNIFORM_BINDING_COUNT = Program::UNIFORM_BINDING_COUNT;
+    //    static constexpr uint8_t SAMPLER_BINDING_COUNT = Program::SAMPLER_BINDING_COUNT;
 
-    static_assert(sizeof(UniformBufferBitmask) * 8 >=
-                  (Program::UNIFORM_BINDING_COUNT) *MAX_SUPPORTED_SHADER_STAGE);
-    static_assert(sizeof(SamplerBitmask) * 8 >=
-                  Program::SAMPLER_BINDING_COUNT * MAX_SUPPORTED_SHADER_STAGE);
+    static constexpr uint8_t UNIFORM_BINDING_COUNT = 10;// Program::UNIFORM_BINDING_COUNT;
+    static constexpr uint8_t SAMPLER_BINDING_COUNT = 32;// Program::SAMPLER_BINDING_COUNT;
 
-    static constexpr StageBitMask VERTEX_STAGE = 0x1;
-    static constexpr StageBitMask FRAGMENT_STAGE = (0x1 << (sizeof(StageBitMask) / 4));
+    static_assert(
+            sizeof(UniformBufferBitmask) * 8 >= UNIFORM_BINDING_COUNT * MAX_SUPPORTED_SHADER_STAGE);
+    static_assert(sizeof(SamplerBitmask) * 8 >= SAMPLER_BINDING_COUNT * MAX_SUPPORTED_SHADER_STAGE);
+
+    static constexpr UniformBufferBitmask UBO_VERTEX_STAGE = 0x1;
+    static constexpr UniformBufferBitmask UBO_FRAGMENT_STAGE =
+            (0x1ULL << (sizeof(UniformBufferBitmask) * 4));
+
+    static constexpr SamplerBitmask SAMPLER_VERTEX_STAGE = 0x1;
+    static constexpr SamplerBitmask SAMPLER_FRAGMENT_STAGE =
+            (0x1ULL << (sizeof(SamplerBitmask) * 4));
+
+    static constexpr InputAttachmentBitmask INPUT_ATTACHMENT_VERTEX_STAGE = 0x1;
+    static constexpr InputAttachmentBitmask INPUT_ATTACHMENT_FRAGMENT_STAGE =
+            (0x1ULL << (sizeof(InputAttachmentBitmask) * 4));
+
     static constexpr uint8_t UBO_SET_INDEX = 0;
     static constexpr uint8_t SAMPLER_SET_INDEX = 1;
+    static constexpr uint8_t INPUT_ATTACHMENT_SET_INDEX = 2;
 
-    using LayoutArray = std::array<VkDescriptorSetLayout, CONCURRENT_DESCRIPTOR_SET_COUNT>;
+    using LayoutArray = CappedArray<VkDescriptorSetLayout, DISTINCT_DESCRIPTOR_SET_COUNT>;
     struct SamplerBundle {
         VkDescriptorImageInfo info = {};
         VulkanTexture* texture = nullptr;
         uint8_t binding = 0;
         SamplerBitmask stage = 0;
     };
-    using SamplerArray = CappedArray<SamplerBundle, Program::SAMPLER_BINDING_COUNT>;
-    using GetPipelineLayoutFunction = std::function<VkPipelineLayout(LayoutArray)>;
+    using SamplerArray = CappedArray<SamplerBundle, SAMPLER_BINDING_COUNT>;
+    using GetPipelineLayoutFunction = std::function<VkPipelineLayout(LayoutArray const&)>;
 
     VulkanDescriptorSetManager(VkDevice device, VulkanResourceAllocator* resourceAllocator);
 
@@ -93,19 +108,37 @@ public:
 
     void gc() noexcept;
 
-    // This will write/update all of the descriptor set.
-    void bind(VulkanCommandBuffer* commands, GetPipelineLayoutFunction& getPipelineFn);
+    // This will write/update/bind all of the descriptor set.
+    VkPipelineLayout bind(VulkanCommandBuffer* commands, DescriptorBindingLayout const& layout,
+            GetPipelineLayoutFunction& getPipelineFn);
+
+    // This is to "dynamically" bind UBOs that might have offsets changed between pipeline binding
+    // and the draw call. We do this because uniforms for primitives that are part of the same
+    // renderable can be stored within one uniform buffer. This can be a no-op if there were no
+    // range changes between the pipeline bind and the draw call. We will re-use applicable states
+    // provided within the bind() call, including the UBO descriptor set layout.
+    // TODO: make it a proper dynamic binding when Filament-side descriptor changes are completed.
+    void dynamicBind(VulkanCommandBuffer* commands);
 
     void setUniformBufferObject(uint32_t bindingIndex, VulkanBufferObject* bufferObject,
             VkDeviceSize offset, VkDeviceSize size) noexcept;
 
-    void setSamplers(SamplerArray&& samplers);
+    void setSamplers(SamplerArray&& samplers) noexcept;
+
+    void setInputAttachment(VulkanAttachment attachment) noexcept;
+
+    void unsetUniformBufferObject(uint32_t bindingIndex);
+
+    void setPlaceHolders(VkSampler sampler, VulkanTexture* texture,
+            VulkanBufferObject* bufferObject) noexcept;
+
+    void clearState() noexcept;
 
 private:
     class Impl;
     Impl* mImpl;
 };
 
-} // namespace filament::backend
+}// namespace filament::backend
 
 #endif// TNT_FILAMENT_BACKEND_CACHING_VULKANDESCRIPTORSET_H

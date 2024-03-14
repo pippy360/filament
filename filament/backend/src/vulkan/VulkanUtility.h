@@ -90,6 +90,9 @@ utils::FixedCapacityVector<OutType> enumerate(
 #undef EXPAND_ENUM_NO_ARGS
 #undef EXPAND_ENUM_ARGS
 
+// Used across pipeline related classes.
+using UsageFlags = utils::bitset128;
+
 // Useful shorthands
 using VkFormatList = utils::FixedCapacityVector<VkFormat>;
 
@@ -122,14 +125,14 @@ public:
         clear();
     }
 
-    inline const_iterator begin() {
+    inline const_iterator begin() const {
         if (mInd == 0) {
             return mArray.cend();
         }
         return mArray.cbegin();
     }
 
-    inline const_iterator end() {
+    inline const_iterator end() const {
         if (mInd > 0 && mInd < CAPACITY) {
             return mArray.begin() + mInd;
         }
@@ -170,8 +173,24 @@ public:
         return mArray[ind];
     }
 
-    inline size_t size() {
+    inline T const& operator[](uint16_t ind) const {
+        return mArray[ind];
+    }
+
+    inline uint32_t size() const {
         return mInd;
+    }
+
+    T* data() {
+        return mArray.data();
+    }
+
+    T const* data() const {
+        return mArray.data();
+    }
+
+    bool operator==(CappedArray const& b) const {
+        return this->mArray == b.mArray;
     }
 
 private:
@@ -181,7 +200,23 @@ private:
     }
 
     FixedSizeArray mArray;
-    size_t mInd = 0;
+    uint32_t mInd = 0;
+};
+
+// Used to describe the descriptor binding in shader stages. We assume that the binding index does
+// not exceed 31. We also assume that we have two shader stages - vertex and fragment.  The below
+// types and struct are used across VulkanDescriptorSet and VulkanProgram.
+using UniformBufferBitmask = uint32_t;
+using SamplerBitmask = uint64_t;
+
+// We only have at most one input attachment, so this bitmask exists only to make the code more
+// general.
+using InputAttachmentBitmask = uint8_t;
+
+struct DescriptorBindingLayout {
+    UniformBufferBitmask ubo = 0;
+    SamplerBitmask sampler = 0;
+    InputAttachmentBitmask inputAttachment = 0;
 };
 
 } // namespace filament::backend

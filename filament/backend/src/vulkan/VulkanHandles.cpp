@@ -49,6 +49,21 @@ static void clampToFramebuffer(VkRect2D* rect, uint32_t fbWidth, uint32_t fbHeig
     rect->extent.height = std::max(top - y, 0);
 }
 
+template <typename T>
+std::string printx(T x) {
+    std::string o = "0x";
+    for (size_t i = 0; i < sizeof(x) * 8; ++i) {
+        if (i%16 == 0 && i > 0) o+="-";
+        if (x & (1 << i)) {
+            o+="1";
+        } else {
+            o+="0";
+        }
+    }
+    return o;
+}
+
+
 VulkanProgram::VulkanProgram(VkDevice device, Program const& builder) noexcept
     : HwProgram(builder.getName()),
       VulkanResource(VulkanResourceType::PROGRAM),
@@ -60,6 +75,18 @@ VulkanProgram::VulkanProgram(VkDevice device, Program const& builder) noexcept
     auto const& specializationConstants = builder.getSpecializationConstants();
 
     std::vector<uint32_t> shader;
+    constexpr uint8_t UBO_MODULE_OFFSET = (sizeof(UniformBufferBitmask) * 8) / MAX_SHADER_MODULES;
+    constexpr uint8_t SAMPLER_MODULE_OFFSET = (sizeof(SamplerBitmask) * 8) / MAX_SHADER_MODULES;
+    constexpr uint8_t INPUT_ATTACHMENT_MODULE_OFFSET =
+            (sizeof(InputAttachmentBitmask) * 8) / MAX_SHADER_MODULES;
+    auto& uboMask = mInfo->layout.ubo;
+    auto& samplerMask = mInfo->layout.sampler;
+    auto& inputAttachmentMask = mInfo->layout.inputAttachment;
+
+    static_assert(static_cast<ShaderStage>(0) == ShaderStage::VERTEX &&
+            static_cast<ShaderStage>(1) == ShaderStage::FRAGMENT &&
+            MAX_SHADER_MODULES ==2);
+
     for (size_t i = 0; i < MAX_SHADER_MODULES; i++) {
         Program::ShaderBlob const& blob = blobs[i];
 
@@ -71,6 +98,16 @@ VulkanProgram::VulkanProgram(VkDevice device, Program const& builder) noexcept
             data = (uint32_t*) shader.data();
             dataSize = shader.size() * 4;
         }
+
+        auto const [ubo, sampler, inputAttachment] = getProgramBindings(blob);
+
+//        utils::slog.e <<"program=" << name.c_str() << " module[i]=" << i
+//                << " ubo=" << printx(ubo) << " sampler=" << printx(sampler) << " input=" << printx(inputAttachment)
+//                << utils::io::endl;
+                   
+        uboMask |= (static_cast<UniformBufferBitmask>(ubo) << (UBO_MODULE_OFFSET * i));
+        samplerMask |= (static_cast<SamplerBitmask>(sampler) << (SAMPLER_MODULE_OFFSET * i));
+        inputAttachmentMask |= (static_cast<InputAttachmentBitmask>(inputAttachment) << (INPUT_ATTACHMENT_MODULE_OFFSET * i));
 
         VkShaderModule& module = modules[i];
         VkShaderModuleCreateInfo moduleInfo = {
@@ -98,6 +135,9 @@ VulkanProgram::VulkanProgram(VkDevice device, Program const& builder) noexcept
                 reinterpret_cast<uint64_t>(module), name.c_str());
 #endif
     }
+//    utils::slog.e <<"this=" << this << " name=" <<  name.c_str()
+//                  << " ubo=" << printx(uboMask) << " sampler=" << printx(samplerMask)
+//                  << " input=" << printx(inputAttachmentMask) << utils::io::endl;
 
 #if FVK_ENABLED_DEBUG_SAMPLER_NAME
     auto& bindingToName = mInfo->bindingToName;
@@ -106,6 +146,7 @@ VulkanProgram::VulkanProgram(VkDevice device, Program const& builder) noexcept
     auto& groupInfo = builder.getSamplerGroupInfo();
     auto& bindingToSamplerIndex = mInfo->bindingToSamplerIndex;
     auto& usage = mInfo->usage;
+    auto& bindings = mInfo->bindings;
     for (uint8_t groupInd = 0; groupInd < Program::SAMPLER_BINDING_COUNT; groupInd++) {
         auto const& group = groupInfo[groupInd];
         auto const& samplers = group.samplers;
@@ -113,6 +154,8 @@ VulkanProgram::VulkanProgram(VkDevice device, Program const& builder) noexcept
             uint32_t const binding = samplers[i].binding;
             bindingToSamplerIndex[binding] = (groupInd << 8) | (0xff & i);
             usage = VulkanPipelineCache::getUsageFlags(binding, group.stageFlags, usage);
+            assert_invariant(bindings.find(binding) == bindings.end());
+            bindings.insert(binding);
 
 #if FVK_ENABLED_DEBUG_SAMPLER_NAME
             bindingToName[binding] = samplers[i].name.c_str();
@@ -124,24 +167,6 @@ VulkanProgram::VulkanProgram(VkDevice device, Program const& builder) noexcept
     utils::slog.d << "Created VulkanProgram " << builder << ", shaders = (" << modules[0]
                   << ", " << modules[1] << ")" << utils::io::endl;
 #endif
-}
-
-VulkanProgram::VulkanProgram(VkDevice device, VkShaderModule vs, VkShaderModule fs,
-        CustomSamplerInfoList const& samplerInfo) noexcept
-    : VulkanResource(VulkanResourceType::PROGRAM),
-      mInfo(new PipelineInfo()),
-      mDevice(device) {
-    mInfo->shaders[0] = vs;
-    mInfo->shaders[1] = fs;
-    auto& bindingToSamplerIndex = mInfo->bindingToSamplerIndex;
-    auto& usage = mInfo->usage;
-    bindingToSamplerIndex.resize(samplerInfo.size());
-    for (uint16_t binding = 0; binding < samplerInfo.size(); ++binding) {
-        auto const& sampler = samplerInfo[binding];
-        bindingToSamplerIndex[binding]
-                = (sampler.groupIndex << 8) | (0xff & sampler.samplerIndex);
-        usage = VulkanPipelineCache::getUsageFlags(binding, sampler.flags, usage);
-    }
 }
 
 VulkanProgram::~VulkanProgram() {

@@ -21,10 +21,10 @@
 #include "DriverBase.h"
 
 #include "VulkanBuffer.h"
-#include "VulkanPipelineCache.h"
 #include "VulkanResources.h"
 #include "VulkanSwapChain.h"
 #include "VulkanTexture.h"
+#include "VulkanUtility.h"
 
 #include "private/backend/SamplerGroup.h"
 
@@ -39,17 +39,8 @@ struct VulkanProgram : public HwProgram, VulkanResource {
 
     VulkanProgram(VkDevice device, Program const& builder) noexcept;
 
-    struct CustomSamplerInfo {
-        uint8_t groupIndex;
-        uint8_t samplerIndex;
-        ShaderStageFlags flags;
-    };
-    using CustomSamplerInfoList = utils::FixedCapacityVector<CustomSamplerInfo>;
+    using BindingList = CappedArray<uint16_t, MAX_SAMPLER_COUNT>;
 
-    // We allow custom descriptor of the samplers within shaders.  This is needed if we want to use
-    // a program that exists only in the backend - for example, for shader-based bliting.
-    VulkanProgram(VkDevice device, VkShaderModule vs, VkShaderModule fs,
-            CustomSamplerInfoList const& samplerInfo) noexcept;
     ~VulkanProgram();
 
     inline VkShaderModule getVertexShader() const {
@@ -58,10 +49,18 @@ struct VulkanProgram : public HwProgram, VulkanResource {
 
     inline VkShaderModule getFragmentShader() const { return mInfo->shaders[1]; }
 
-    inline VulkanPipelineCache::UsageFlags getUsage() const { return mInfo->usage; }
+    inline UsageFlags getUsage() const { return mInfo->usage; }
 
     inline utils::FixedCapacityVector<uint16_t> const& getBindingToSamplerIndex() const {
         return mInfo->bindingToSamplerIndex;
+    }
+
+    inline BindingList const& getBindings() const {
+        return mInfo->bindings;
+    }
+
+    inline DescriptorBindingLayout getBindingLayout() const {
+        return mInfo->layout;
     }
 
 #if FVK_ENABLED_DEBUG_SAMPLER_NAME
@@ -80,16 +79,20 @@ private:
             : bindingToSamplerIndex(MAX_SAMPLER_COUNT, 0xffff)
 #if FVK_ENABLED_DEBUG_SAMPLER_NAME
             , bindingToName(MAX_SAMPLER_COUNT, "")
-#endif              
+#endif
             {}
 
         // This bitset maps to each of the sampler in the sampler groups associated with this
         // program, and whether each sampler is used in which shader (i.e. vert, frag, compute).
-        VulkanPipelineCache::UsageFlags usage;
+        UsageFlags usage;
+
+        BindingList bindings;
 
         // We store the samplerGroupIndex as the top 8-bit and the index within each group as the lower 8-bit.
         utils::FixedCapacityVector<uint16_t> bindingToSamplerIndex;
         VkShaderModule shaders[MAX_SHADER_MODULES] = { VK_NULL_HANDLE };
+
+        DescriptorBindingLayout layout;
 
 #if FVK_ENABLED_DEBUG_SAMPLER_NAME
         // We store the sampler name mapped from binding index (only for debug purposes).
