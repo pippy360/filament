@@ -30,57 +30,81 @@
 #include <bluevk/BlueVK.h>
 #include <tsl/robin_map.h>
 
+#include <functional>
+
 namespace filament::backend {
+
+using namespace descset;
+
+// [GDSR]: Great-Descriptor-Set-Refactor: As of 03/20/24, the Filament frontend is planning to
+// introduce descriptor set. This PR will arrive before that change is complete. As such, some of
+// the methods introduced here will be obsolete, and certain logic will be generalized.
+
 
 // Abstraction over the pool and the layout cache.
 class VulkanDescriptorSetManager {
 public:
-    using StageBitMask = uint32_t;
-    using UniformBufferBitmask = StageBitMask;
-    using SamplerBitmask = StageBitMask;
-
-    static constexpr uint8_t CONCURRENT_DESCRIPTOR_SET_COUNT = 2;// UBO and samplers
-    static constexpr uint8_t MAX_SUPPORTED_SHADER_STAGE = 2;     // Vertex and fragment.
-
-    static_assert(sizeof(UniformBufferBitmask) * 8 >=
-                  (Program::UNIFORM_BINDING_COUNT) *MAX_SUPPORTED_SHADER_STAGE);
-    static_assert(sizeof(SamplerBitmask) * 8 >=
-                  Program::SAMPLER_BINDING_COUNT * MAX_SUPPORTED_SHADER_STAGE);
-
-    static constexpr StageBitMask VERTEX_STAGE = 0x1;
-    static constexpr StageBitMask FRAGMENT_STAGE = (0x1 << (sizeof(StageBitMask) / 4));
-    static constexpr uint8_t UBO_SET_INDEX = 0;
-    static constexpr uint8_t SAMPLER_SET_INDEX = 1;
-
-    using LayoutArray = std::array<VkDescriptorSetLayout, CONCURRENT_DESCRIPTOR_SET_COUNT>;
-    struct SamplerBundle {
-        VkDescriptorImageInfo info = {};
-        VulkanTexture* texture = nullptr;
-        uint8_t binding = 0;
-        SamplerBitmask stage = 0;
-    };
-    using SamplerArray = CappedArray<SamplerBundle, Program::SAMPLER_BINDING_COUNT>;
-    using GetPipelineLayoutFunction = std::function<VkPipelineLayout(LayoutArray)>;
+    // TODO: To be modified after [GDSR]
+    // right now we consider at most three descriptor sets defined in the shader - ubo,
+    // sampler, and input attachment. Post-GDSR, we will have different sets of descriptors.
+    static constexpr uint8_t UNIQUE_DESCRIPTOR_SET_COUNT =
+            VulkanDescriptorSetLayout::UNIQUE_DESCRIPTOR_SET_COUNT;
+    using GetPipelineLayoutFunction =
+            std::function<VkPipelineLayout(VulkanDescriptorSetLayoutList const&)>;
 
     VulkanDescriptorSetManager(VkDevice device, VulkanResourceAllocator* resourceAllocator);
 
     void terminate() noexcept;
 
-    void gc() noexcept;
+    void gc();
 
-    // This will write/update all of the descriptor set.
-    void bind(VulkanCommandBuffer* commands, GetPipelineLayoutFunction& getPipelineFn);
+    // TODO: Obsolete after [GDSR].
+    // This will write/update/bind all of the descriptor set. After [GDSR], the binding for
+    // descriptor sets will not depend on the layout described in the program.
+    VkPipelineLayout bind(VulkanCommandBuffer* commands, VulkanProgram* program,
+            GetPipelineLayoutFunction& getPipelineLayoutFn);
 
-    void setUniformBufferObject(uint32_t bindingIndex, VulkanBufferObject* bufferObject,
-            VkDeviceSize offset, VkDeviceSize size) noexcept;
+    // TODO: Obsolete after [GDSR].
+    // This is to "dynamically" bind UBOs that might have offsets changed between pipeline binding
+    // and the draw call. We do this because UBOs for primitives that are part of the same
+    // renderable can be stored within one buffer. This can be a no-op if there were no range
+    // changes between the pipeline bind and the draw call. We will re-use applicable states
+    // provided within the bind() call, including the UBO descriptor set layout. TODO: make it a
+    // proper dynamic binding when Filament-side descriptor changes are completed.
+    void dynamicBind(VulkanCommandBuffer* commands, Handle<VulkanDescriptorSetLayout> uboLayout);
 
-    void setSamplers(SamplerArray&& samplers);
+    Handle<VulkanDescriptorSetLayout> createLayout(descset::DescriptorSetLayout const& layout);
+
+    void destroyLayout(Handle<VulkanDescriptorSetLayout> layout);
+
+    void updateBuffer(Handle<VulkanDescriptorSet> set, uint8_t binding,
+            VulkanBufferObject* bufferObject, VkDeviceSize offset, VkDeviceSize size) noexcept;
+
+    void updateSampler(Handle<VulkanDescriptorSet> set, uint8_t binding,
+            VulkanTexture* texture, VkSampler sampler) noexcept;
+
+    void updateInputAttachment(Handle<VulkanDescriptorSet> set, VulkanAttachment attachment) noexcept;
+
+    void clearBuffer(uint32_t bindingIndex);
+
+    void setPlaceHolders(VkSampler sampler, VulkanTexture* texture,
+            VulkanBufferObject* bufferObject) noexcept;
+
+    void clearState() noexcept;
+
+    // TODO: To be completed after [GDSR]
+    Handle<VulkanDescriptorSet> createSet(Handle<VulkanDescriptorSetLayout> layout) {
+        return Handle<VulkanDescriptorSet>();
+    }
+
+    // TODO: To be completed after [GDSR]
+    void destroySet(Handle<VulkanDescriptorSet> set) {}
 
 private:
     class Impl;
     Impl* mImpl;
 };
 
-} // namespace filament::backend
+}// namespace filament::backend
 
 #endif// TNT_FILAMENT_BACKEND_CACHING_VULKANDESCRIPTORSET_H
