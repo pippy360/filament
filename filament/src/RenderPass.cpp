@@ -856,7 +856,7 @@ void RenderPass::Executor::execute(FEngine& engine,
 
         bool const scissorOverride = mScissorOverride;
         if (UTILS_UNLIKELY(scissorOverride)) {
-            // initialize with scissor overide
+            // initialize with scissor override
             driver.scissor(mScissor);
         }
 

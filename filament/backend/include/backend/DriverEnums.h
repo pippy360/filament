@@ -25,6 +25,7 @@
 #include <backend/PresentCallable.h>
 
 #include <utils/ostream.h>
+#include <utils/FixedCapacityVector.h>
 
 #include <math/vec4.h>
 
@@ -95,6 +96,8 @@ static constexpr size_t MAX_VERTEX_ATTRIBUTE_COUNT  = 16;   // This is guarantee
 static constexpr size_t MAX_SAMPLER_COUNT           = 62;   // Maximum needed at feature level 3.
 static constexpr size_t MAX_VERTEX_BUFFER_COUNT     = 16;   // Max number of bound buffer objects.
 static constexpr size_t MAX_SSBO_COUNT              = 4;    // This is guaranteed by OpenGL ES.
+static constexpr size_t MAX_DESCRIPTOR_SET_COUNT    = 4;    // This is guaranteed by Vulkan.
+static constexpr size_t MAX_DESCRIPTOR_COUNT        = 64;   // per set
 
 // Per feature level caps
 // Use (int)FeatureLevel to index this array
@@ -180,6 +183,60 @@ static constexpr const char* shaderLanguageToString(ShaderLanguage shaderLanguag
             return "MSL";
     }
 }
+
+enum class ShaderStage : uint8_t {
+    VERTEX = 0,
+    FRAGMENT = 1,
+    COMPUTE = 2
+};
+
+static constexpr size_t PIPELINE_STAGE_COUNT = 2;
+enum class ShaderStageFlags : uint8_t {
+    NONE        =    0,
+    VERTEX      =    0x1,
+    FRAGMENT    =    0x2,
+    COMPUTE     =    0x4,
+    ALL_SHADER_STAGE_FLAGS = VERTEX | FRAGMENT | COMPUTE
+};
+
+static inline constexpr bool hasShaderType(ShaderStageFlags flags, ShaderStage type) noexcept {
+    switch (type) {
+        case ShaderStage::VERTEX:
+            return bool(uint8_t(flags) & uint8_t(ShaderStageFlags::VERTEX));
+        case ShaderStage::FRAGMENT:
+            return bool(uint8_t(flags) & uint8_t(ShaderStageFlags::FRAGMENT));
+        case ShaderStage::COMPUTE:
+            return bool(uint8_t(flags) & uint8_t(ShaderStageFlags::COMPUTE));
+    }
+}
+
+enum class DescriptorType : uint8_t {
+    UNIFORM_BUFFER,
+    SHADER_STORAGE_BUFFER,
+    SAMPLER,
+};
+
+enum class DescriptorFlags : uint8_t {
+    NONE = 0x00,
+    DYNAMIC_OFFSET = 0x01
+};
+
+using descriptor_set_t = uint8_t;
+
+using descriptor_binding_t = uint8_t;
+
+struct DescriptorSetLayoutBinding {
+    DescriptorType type;
+    ShaderStageFlags stageFlags;
+    descriptor_binding_t binding;
+    DescriptorFlags flags;
+    uint16_t count;
+};
+
+struct DescriptorSetLayout {
+    utils::FixedCapacityVector<DescriptorSetLayoutBinding> bindings;
+};
+
 
 /**
  * Bitmask for selecting render buffers
@@ -1059,32 +1116,6 @@ struct RasterState {
  * \privatesection
  */
 
-enum class ShaderStage : uint8_t {
-    VERTEX = 0,
-    FRAGMENT = 1,
-    COMPUTE = 2
-};
-
-static constexpr size_t PIPELINE_STAGE_COUNT = 2;
-enum class ShaderStageFlags : uint8_t {
-    NONE        =    0,
-    VERTEX      =    0x1,
-    FRAGMENT    =    0x2,
-    COMPUTE     =    0x4,
-    ALL_SHADER_STAGE_FLAGS = VERTEX | FRAGMENT | COMPUTE
-};
-
-static inline constexpr bool hasShaderType(ShaderStageFlags flags, ShaderStage type) noexcept {
-    switch (type) {
-        case ShaderStage::VERTEX:
-            return bool(uint8_t(flags) & uint8_t(ShaderStageFlags::VERTEX));
-        case ShaderStage::FRAGMENT:
-            return bool(uint8_t(flags) & uint8_t(ShaderStageFlags::FRAGMENT));
-        case ShaderStage::COMPUTE:
-            return bool(uint8_t(flags) & uint8_t(ShaderStageFlags::COMPUTE));
-    }
-}
-
 /**
  * Selects which buffers to clear at the beginning of the render pass, as well as which buffers
  * can be discarded at the beginning and end of the render pass.
@@ -1255,6 +1286,8 @@ enum class StereoscopicType : uint8_t {
 template<> struct utils::EnableBitMaskOperators<filament::backend::ShaderStageFlags>
         : public std::true_type {};
 template<> struct utils::EnableBitMaskOperators<filament::backend::TargetBufferFlags>
+        : public std::true_type {};
+template<> struct utils::EnableBitMaskOperators<filament::backend::DescriptorFlags>
         : public std::true_type {};
 template<> struct utils::EnableBitMaskOperators<filament::backend::TextureUsage>
         : public std::true_type {};

@@ -275,6 +275,21 @@ void MetalDriver::endFrame(uint32_t frameId) {
 #endif
 }
 
+void MetalDriver::updateDescriptorSetBuffer(
+        backend::DescriptorSetHandle dsh,
+        backend::descriptor_binding_t binding,
+        backend::BufferObjectHandle boh,
+        uint32_t offset,
+        uint32_t size) {
+}
+
+void MetalDriver::updateDescriptorSetTexture(
+        backend::DescriptorSetHandle dsh,
+        backend::descriptor_binding_t binding,
+        backend::TextureHandle th,
+        SamplerParams params) {
+}
+
 void MetalDriver::flush(int) {
     ASSERT_PRECONDITION(!isInRenderPass(mContext),
                         "flush must be called outside of a render pass.");
@@ -456,6 +471,14 @@ void MetalDriver::createTimerQueryR(Handle<HwTimerQuery> tqh, int) {
     // nothing to do, timer query was constructed in createTimerQueryS
 }
 
+void MetalDriver::createDescriptorSetLayoutR(Handle<HwDescriptorSetLayout> dslh,
+        DescriptorSetLayout&& info) {
+}
+
+void MetalDriver::createDescriptorSetR(Handle<HwDescriptorSet> dsh,
+        Handle<HwDescriptorSetLayout> dslh) {
+}
+
 Handle<HwVertexBufferInfo> MetalDriver::createVertexBufferInfoS() noexcept {
     return alloc_handle<MetalVertexBufferInfo>();
 }
@@ -522,6 +545,14 @@ Handle<HwTimerQuery> MetalDriver::createTimerQueryS() noexcept {
     // The handle must be constructed here, as a synchronous call to getTimerQueryValue might happen
     // before createTimerQueryR is executed.
     return alloc_and_construct_handle<MetalTimerQuery, HwTimerQuery>();
+}
+
+Handle<HwDescriptorSetLayout> MetalDriver::createDescriptorSetLayoutS() noexcept {
+    return alloc_and_construct_handle<MetalDescriptorSetLayout, HwDescriptorSetLayout>();
+}
+
+Handle<HwDescriptorSet> MetalDriver::createDescriptorSetS() noexcept {
+    return alloc_and_construct_handle<MetalDescriptorSet, HwDescriptorSet>();
 }
 
 void MetalDriver::destroyVertexBufferInfo(Handle<HwVertexBufferInfo> vbih) {
@@ -631,6 +662,12 @@ void MetalDriver::destroyTimerQuery(Handle<HwTimerQuery> tqh) {
     if (tqh) {
         destruct_handle<MetalTimerQuery>(tqh);
     }
+}
+
+void MetalDriver::destroyDescriptorSetLayout(Handle<HwDescriptorSetLayout> dslh) {
+}
+
+void MetalDriver::destroyDescriptorSet(Handle<HwDescriptorSet> dsh) {
 }
 
 void MetalDriver::terminate() {
@@ -1185,45 +1222,6 @@ void MetalDriver::bindBufferRange(BufferObjectBinding bindingType, uint32_t inde
                     .buffer = bo,
                     .offset = offset,
                     .bound = true
-            };
-
-            break;
-        }
-    }
-}
-
-void MetalDriver::unbindBuffer(BufferObjectBinding bindingType, uint32_t index) {
-
-    assert_invariant(bindingType == BufferObjectBinding::SHADER_STORAGE ||
-                     bindingType == BufferObjectBinding::UNIFORM);
-
-    switch (bindingType) {
-        default:
-        case BufferObjectBinding::UNIFORM: {
-            assert_invariant(index < Program::UNIFORM_BINDING_COUNT);
-            auto* currentBo = mContext->uniformState[index].buffer;
-            if (currentBo) {
-                currentBo->boundUniformBuffers.unset(index);
-            }
-            mContext->uniformState[index] = BufferState {
-                    .buffer = nullptr,
-                    .offset = 0,
-                    .bound = false
-            };
-
-            break;
-        }
-
-        case BufferObjectBinding::SHADER_STORAGE: {
-            assert_invariant(index < MAX_SSBO_COUNT);
-            auto* currentBo = mContext->ssboState[index].buffer;
-            if (currentBo) {
-                currentBo->boundSsbos.unset(index);
-            }
-            mContext->ssboState[index] = BufferState {
-                    .buffer = nullptr,
-                    .offset = 0,
-                    .bound = false
             };
 
             break;
@@ -1822,6 +1820,12 @@ void MetalDriver::bindRenderPrimitive(Handle<HwRenderPrimitive> rph) {
     [mContext->currentRenderPassEncoder setVertexBytes:bytes
                                                 length:16
                                                atIndex:ZERO_VERTEX_BUFFER_BINDING];
+}
+
+void MetalDriver::bindDescriptorSet(
+        backend::DescriptorSetHandle dsh,
+        backend::descriptor_set_t set,
+        utils::FixedCapacityVector<uint32_t>&& offsets) {
 }
 
 void MetalDriver::draw2(uint32_t indexOffset, uint32_t indexCount, uint32_t instanceCount) {

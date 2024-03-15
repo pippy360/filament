@@ -390,6 +390,21 @@ void VulkanDriver::endFrame(uint32_t frameId) {
     FVK_SYSTRACE_END();
 }
 
+void VulkanDriver::updateDescriptorSetBuffer(
+        backend::DescriptorSetHandle dsh,
+        backend::descriptor_binding_t binding,
+        backend::BufferObjectHandle boh,
+        uint32_t offset,
+        uint32_t size) {
+}
+
+void VulkanDriver::updateDescriptorSetTexture(
+        backend::DescriptorSetHandle dsh,
+        backend::descriptor_binding_t binding,
+        backend::TextureHandle th,
+        SamplerParams params) {
+}
+
 void VulkanDriver::flush(int) {
     FVK_SYSTRACE_CONTEXT();
     FVK_SYSTRACE_START("flush");
@@ -656,6 +671,14 @@ void VulkanDriver::createTimerQueryR(Handle<HwTimerQuery> tqh, int) {
     // nothing to do, timer query was constructed in createTimerQueryS
 }
 
+void VulkanDriver::createDescriptorSetLayoutR(Handle<HwDescriptorSetLayout> dslh,
+        backend::DescriptorSetLayout&& info) {
+}
+
+void VulkanDriver::createDescriptorSetR(Handle<HwDescriptorSet> dsh,
+        Handle<HwDescriptorSetLayout> dslh) {
+}
+
 Handle<HwVertexBufferInfo> VulkanDriver::createVertexBufferInfoS() noexcept {
     return mResourceAllocator.allocHandle<VulkanVertexBufferInfo>();
 }
@@ -726,6 +749,14 @@ Handle<HwTimerQuery> VulkanDriver::createTimerQueryS() noexcept {
     return tqh;
 }
 
+Handle<HwDescriptorSetLayout> VulkanDriver::createDescriptorSetLayoutS() noexcept {
+    return mResourceAllocator.allocHandle<VulkanDescriptorSetLayout2>();
+}
+
+Handle<HwDescriptorSet> VulkanDriver::createDescriptorSetS() noexcept {
+    return mResourceAllocator.allocHandle<VulkanDescriptorSet2>();
+}
+
 void VulkanDriver::destroySamplerGroup(Handle<HwSamplerGroup> sbh) {
     if (!sbh) {
         return;
@@ -763,6 +794,12 @@ void VulkanDriver::destroyTimerQuery(Handle<HwTimerQuery> tqh) {
     }
     auto vtq = mResourceAllocator.handle_cast<VulkanTimerQuery*>(tqh);
     mThreadSafeResourceManager.release(vtq);
+}
+
+void VulkanDriver::destroyDescriptorSetLayout(Handle<HwDescriptorSetLayout> dslh) {
+}
+
+void VulkanDriver::destroyDescriptorSet(Handle<HwDescriptorSet> dsh) {
 }
 
 Handle<HwStream> VulkanDriver::createStreamNative(void* nativeStream) {
@@ -1518,10 +1555,6 @@ void VulkanDriver::bindBufferRange(BufferObjectBinding bindingType, uint32_t ind
     mPipelineCache.bindUniformBufferObject((uint32_t)index, bo, offset, size);
 }
 
-void VulkanDriver::unbindBuffer(BufferObjectBinding bindingType, uint32_t index) {
-    // TODO: implement unbindBuffer()
-}
-
 void VulkanDriver::bindSamplers(uint32_t index, Handle<HwSamplerGroup> sbh) {
     auto* hwsb = mResourceAllocator.handle_cast<VulkanSamplerGroup*>(sbh);
     mSamplerBindings[index] = hwsb;
@@ -1882,6 +1915,12 @@ void VulkanDriver::bindRenderPrimitive(Handle<HwRenderPrimitive> rph) {
             prim.indexBuffer->indexType);
 
     FVK_SYSTRACE_END();
+}
+
+void VulkanDriver::bindDescriptorSet(
+        backend::DescriptorSetHandle dsh,
+        backend::descriptor_set_t set,
+        utils::FixedCapacityVector<uint32_t>&& offsets) {
 }
 
 void VulkanDriver::draw2(uint32_t indexOffset, uint32_t indexCount, uint32_t instanceCount) {

@@ -544,6 +544,12 @@ struct MetalTimerQuery : public HwTimerQuery {
     std::shared_ptr<Status> status;
 };
 
+struct MetalDescriptorSetLayout : public HwDescriptorSetLayout {
+};
+
+struct MetalDescriptorSet : public HwDescriptorSet {
+};
+
 } // namespace backend
 } // namespace filament
 

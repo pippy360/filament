@@ -90,6 +90,16 @@ public:
     Program& uniformBlockBindings(
             utils::FixedCapacityVector<std::pair<utils::CString, uint8_t>> const& uniformBlockBindings) noexcept;
 
+
+    struct Descriptor {
+        utils::CString name;
+        backend::DescriptorType type;
+        backend::descriptor_set_t set;
+        backend::descriptor_binding_t binding;
+    };
+
+    Program& descriptorBindings(utils::FixedCapacityVector<Descriptor> descriptorBindings) noexcept;
+
     // Note: This is only needed for GLES2.0, this is used to emulate UBO. This function tells
     // the program everything it needs to know about the uniforms at a given binding
     Program& uniforms(uint32_t index, UniformInfo const& uniforms) noexcept;
@@ -142,6 +152,9 @@ public:
     utils::FixedCapacityVector<SpecializationConstant>& getSpecializationConstants() noexcept {
         return mSpecializationConstants;
     }
+    utils::FixedCapacityVector<Descriptor>& getDescriptorBindings() noexcept {
+        return mDescriptorBindings;
+    }
 
     uint64_t getCacheId() const noexcept { return mCacheId; }
 
@@ -160,6 +173,7 @@ private:
     utils::Invocable<utils::io::ostream&(utils::io::ostream& out)> mLogger;
     utils::FixedCapacityVector<SpecializationConstant> mSpecializationConstants;
     utils::FixedCapacityVector<std::pair<utils::CString, uint8_t>> mAttributes;
+    utils::FixedCapacityVector<Descriptor> mDescriptorBindings;
     std::array<UniformInfo, Program::UNIFORM_BINDING_COUNT> mBindingUniformInfo;
     CompilerPriorityQueue mPriorityQueue = CompilerPriorityQueue::HIGH;
     // Indicates the current engine was initialized with multiview stereo, and the variant for this

@@ -28,9 +28,14 @@ namespace filament::backend {
 
 //! \privatesection
 
+struct PipelineLayout {
+    Handle<HwDescriptorSetLayout> setLayout[MAX_DESCRIPTOR_SET_COUNT];      // 16
+};
+
 struct PipelineState {
     Handle<HwProgram> program;                                              //  4
     Handle<HwVertexBufferInfo> vertexBufferInfo;                            //  4
+    PipelineLayout pipelineLayout;                                          // 16
     RasterState rasterState;                                                //  4
     StencilState stencilState;                                              // 12
     PolygonOffset polygonOffset;                                            //  8

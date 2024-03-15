@@ -87,7 +87,7 @@ using LayoutDescriptionList = VulkanProgram::LayoutDescriptionList;
 
 template<typename Bitmask>
 void addDescriptors(Bitmask mask,
-        utils::FixedCapacityVector<DescriptorSetLayoutBinding>& outputList) {
+        utils::FixedCapacityVector<descset::DescriptorSetLayoutBinding>& outputList) {
     constexpr uint8_t MODULE_OFFSET = (sizeof(Bitmask) * 8) / MAX_SHADER_MODULES;
     for (uint8_t i = 0; i < MODULE_OFFSET; ++i) {
         bool const hasVertex = (mask & (1ULL << i)) != 0;
@@ -96,9 +96,9 @@ void addDescriptors(Bitmask mask,
             continue;
         }
 
-        DescriptorSetLayoutBinding binding{
+        descset::DescriptorSetLayoutBinding binding{
             .binding = i,
-            .flags = DescriptorFlags::NONE,
+            .flags = descset::DescriptorFlags::NONE,
             .count = 0,// This is always 0 for now as we pass the size of the UBOs in the Driver API
                        // instead.
         };
@@ -110,11 +110,11 @@ void addDescriptors(Bitmask mask,
                     binding.stageFlags | ShaderStageFlags2::FRAGMENT);
         }
         if constexpr (std::is_same_v<Bitmask, UniformBufferBitmask>) {
-            binding.type = DescriptorType::UNIFORM_BUFFER;
+            binding.type = descset::DescriptorType::UNIFORM_BUFFER;
         } else if constexpr (std::is_same_v<Bitmask, SamplerBitmask>) {
-            binding.type = DescriptorType::SAMPLER;
+            binding.type = descset::DescriptorType::SAMPLER;
         } else if constexpr (std::is_same_v<Bitmask, InputAttachmentBitmask>) {
-            binding.type = DescriptorType::INPUT_ATTACHMENT;
+            binding.type = descset::DescriptorType::INPUT_ATTACHMENT;
         }
         outputList.push_back(binding);
     }
@@ -196,11 +196,11 @@ VulkanProgram::VulkanProgram(VkDevice device, Program const& builder) noexcept
     }
 
     LayoutDescriptionList& layouts = mInfo->layouts;
-    layouts[0].bindings = utils::FixedCapacityVector<DescriptorSetLayoutBinding>::with_capacity(
+    layouts[0].bindings = utils::FixedCapacityVector<descset::DescriptorSetLayoutBinding>::with_capacity(
             countBits(collapseStages(uboMask)));
-    layouts[1].bindings = utils::FixedCapacityVector<DescriptorSetLayoutBinding>::with_capacity(
+    layouts[1].bindings = utils::FixedCapacityVector<descset::DescriptorSetLayoutBinding>::with_capacity(
             countBits(collapseStages(samplerMask)));
-    layouts[2].bindings = utils::FixedCapacityVector<DescriptorSetLayoutBinding>::with_capacity(
+    layouts[2].bindings = utils::FixedCapacityVector<descset::DescriptorSetLayoutBinding>::with_capacity(
             countBits(collapseStages(inputAttachmentMask)));
 
     addDescriptors(uboMask, layouts[0].bindings);

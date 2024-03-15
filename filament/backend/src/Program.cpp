@@ -56,6 +56,12 @@ Program& Program::uniformBlockBindings(
     return *this;
 }
 
+Program& Program::descriptorBindings(
+        utils::FixedCapacityVector<Descriptor> descriptorBindings) noexcept {
+    mDescriptorBindings = std::move(descriptorBindings);
+    return *this;
+}
+
 Program& Program::uniforms(uint32_t index, UniformInfo const& uniforms) noexcept {
     assert_invariant(index < UNIFORM_BINDING_COUNT);
     mBindingUniformInfo[index] = uniforms;
