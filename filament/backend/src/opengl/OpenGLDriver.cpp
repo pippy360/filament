@@ -41,6 +41,7 @@
 #include "private/backend/DriverApi.h"
 
 #include <utils/BitmaskEnum.h>
+#include <utils/FixedCapacityVector.h>
 #include <utils/CString.h>
 #include <utils/Log.h>
 #include <utils/Panic.h>
@@ -59,7 +60,9 @@
 #include <memory>
 #include <mutex>
 #include <new>
+#include <type_traits>
 #include <utility>
+#include <variant>
 
 #include <stdint.h>
 #include <stdlib.h>
@@ -124,17 +127,16 @@ Driver* OpenGLDriver::create(OpenGLPlatform* const platform,
     // this is useful for development, but too verbose even for debug builds
     // For reference on a 64-bits machine in Release mode:
     //    GLIndexBuffer             :   8       moderate
-    //    GLSamplerGroup            :  16       few
     //    GLSwapChain               :  16       few
     //    GLTimerQuery              :  16       few
     //    GLFence                   :  24       few
     //    GLRenderPrimitive         :  32       many
     //    GLBufferObject            :  32       many
     // -- less than or equal 32 bytes
-    //    OpenGLProgram             :  56       moderate
     //    GLTexture                 :  64       moderate
-    // -- less than or equal 64 bytes
     //    GLVertexBuffer            :  76       moderate
+    //    OpenGLProgram             :  96       moderate
+    // -- less than or equal 96 bytes
     //    GLStream                  : 104       few
     //    GLRenderTarget            : 112       few
     //    GLVertexBufferInfo        : 132       moderate
@@ -146,7 +148,6 @@ Driver* OpenGLDriver::create(OpenGLPlatform* const platform,
            << "\nGLVertexBuffer: " << sizeof(GLVertexBuffer)
            << "\nGLVertexBufferInfo: " << sizeof(GLVertexBufferInfo)
            << "\nGLIndexBuffer: " << sizeof(GLIndexBuffer)
-           << "\nGLSamplerGroup: " << sizeof(GLSamplerGroup)
            << "\nGLRenderPrimitive: " << sizeof(GLRenderPrimitive)
            << "\nGLTexture: " << sizeof(GLTexture)
            << "\nGLTimerQuery: " << sizeof(GLTimerQuery)
@@ -209,8 +210,6 @@ OpenGLDriver::OpenGLDriver(OpenGLPlatform* platform, const Platform::DriverConfi
                   driverConfig.handleArenaSize,
                   driverConfig.disableHandleUseAfterFreeCheck),
           mDriverConfig(driverConfig) {
-
-    std::fill(mSamplerBindings.begin(), mSamplerBindings.end(), nullptr);
 
     // set a reasonable default value for our stream array
     mTexturesWithStreamsAttached.reserve(8);
@@ -292,6 +291,17 @@ bool OpenGLDriver::useProgram(OpenGLProgram* p) noexcept {
         // If the program is not valid, we can't call use().
         return false;
     }
+
+    if (UTILS_UNLIKELY(mBoundProgram != p)) {
+        // TODO: we could even improve this if the program could tell us which of the descriptors
+        //       bindings actually changed. In practice, it is likely that set 0 or 1 might not
+        //       change often.
+        utils::bitset32 changed;
+        changed.setValue((1 << MAX_DESCRIPTOR_SET_COUNT) - 1);
+        mRebindDescriptorSets |= changed;
+    }
+
+    mBoundProgram = p;
 
     // set-up textures and samplers in the proper TMUs (as specified in setSamplers)
     p->use(this, mContext);
@@ -435,7 +445,8 @@ Handle<HwProgram> OpenGLDriver::createProgramS() noexcept {
 }
 
 Handle<HwSamplerGroup> OpenGLDriver::createSamplerGroupS() noexcept {
-    return initHandle<GLSamplerGroup>();
+    // TODO: goes away
+    return {};
 }
 
 Handle<HwTexture> OpenGLDriver::createTextureS() noexcept {
@@ -609,10 +620,8 @@ void OpenGLDriver::createProgramR(Handle<HwProgram> ph, Program&& program) {
 }
 
 void OpenGLDriver::createSamplerGroupR(Handle<HwSamplerGroup> sbh, uint32_t size,
-        utils::FixedSizeString<32> debugName) {
-    DEBUG_MARKER()
-
-    construct<GLSamplerGroup>(sbh, size);
+        utils::FixedSizeString<32>) {
+    // TODO: goes away
 }
 
 UTILS_NOINLINE
@@ -1509,11 +1518,14 @@ void OpenGLDriver::createTimerQueryR(Handle<HwTimerQuery> tqh, int) {
 void OpenGLDriver::createDescriptorSetLayoutR(Handle<HwDescriptorSetLayout> dslh,
         DescriptorSetLayout&& info) {
     DEBUG_MARKER()
+    construct<GLDescriptorSetLayout>(dslh, std::move(info));
 }
 
 void OpenGLDriver::createDescriptorSetR(Handle<HwDescriptorSet> dsh,
         Handle<HwDescriptorSetLayout> dslh) {
     DEBUG_MARKER()
+    GLDescriptorSetLayout const* dsl = handle_cast<GLDescriptorSetLayout*>(dslh);
+    construct<GLDescriptorSet>(dsh, mContext, dsl);
 }
 
 // ------------------------------------------------------------------------------------------------
@@ -1594,16 +1606,7 @@ void OpenGLDriver::destroyProgram(Handle<HwProgram> ph) {
 }
 
 void OpenGLDriver::destroySamplerGroup(Handle<HwSamplerGroup> sbh) {
-    DEBUG_MARKER()
-    if (sbh) {
-        GLSamplerGroup* sb = handle_cast<GLSamplerGroup*>(sbh);
-        for (auto& binding : mSamplerBindings) {
-            if (binding == sb) {
-                binding = nullptr;
-            }
-        }
-        destruct(sbh, sb);
-    }
+    // TODO: goes away
 }
 
 void OpenGLDriver::destroyTexture(Handle<HwTexture> th) {
@@ -1728,10 +1731,18 @@ void OpenGLDriver::destroyTimerQuery(Handle<HwTimerQuery> tqh) {
 
 void OpenGLDriver::destroyDescriptorSetLayout(Handle<HwDescriptorSetLayout> dslh) {
     DEBUG_MARKER()
+    if (dslh) {
+        GLDescriptorSetLayout* dsl = handle_cast<GLDescriptorSetLayout*>(dslh);
+        destruct(dslh, dsl);
+    }
 }
 
 void OpenGLDriver::destroyDescriptorSet(Handle<HwDescriptorSet> dsh) {
     DEBUG_MARKER()
+    if (dsh) {
+        GLDescriptorSet* ds = handle_cast<GLDescriptorSet*>(dsh);
+        destruct(dsh, ds);
+    }
 }
 
 // ------------------------------------------------------------------------------------------------
@@ -2301,89 +2312,8 @@ void OpenGLDriver::resetBufferObject(Handle<HwBufferObject> boh) {
     }
 }
 
-void OpenGLDriver::updateSamplerGroup(Handle<HwSamplerGroup> sbh,
-        BufferDescriptor&& data) {
-    DEBUG_MARKER()
-
-    OpenGLContext const& context = getContext();
-
-#if defined(GL_EXT_texture_filter_anisotropic)
-    const bool anisotropyWorkaround =
-            context.ext.EXT_texture_filter_anisotropic &&
-            context.bugs.texture_filter_anisotropic_broken_on_sampler;
-#endif
-
-    GLSamplerGroup* const sb = handle_cast<GLSamplerGroup *>(sbh);
-    assert_invariant(sb->textureUnitEntries.size() == data.size / sizeof(SamplerDescriptor));
-
-#ifndef FILAMENT_SILENCE_NOT_SUPPORTED_BY_ES2
-    bool const es2 = context.isES2();
-#endif
-
-    auto const* const pSamplers = (SamplerDescriptor const*)data.buffer;
-    for (size_t i = 0, c = sb->textureUnitEntries.size(); i < c; i++) {
-        GLuint samplerId = 0u;
-        const GLTexture* t = nullptr;
-        if (UTILS_LIKELY(pSamplers[i].t)) {
-            t = handle_cast<const GLTexture*>(pSamplers[i].t);
-            assert_invariant(t);
-
-            SamplerParams params = pSamplers[i].s;
-            if (UTILS_UNLIKELY(t->target == SamplerType::SAMPLER_EXTERNAL)) {
-                // From OES_EGL_image_external spec:
-                // "The default s and t wrap modes are CLAMP_TO_EDGE, and it is an INVALID_ENUM
-                //  error to set the wrap mode to any other value."
-                params.wrapS = SamplerWrapMode::CLAMP_TO_EDGE;
-                params.wrapT = SamplerWrapMode::CLAMP_TO_EDGE;
-                params.wrapR = SamplerWrapMode::CLAMP_TO_EDGE;
-            }
-            // GLES3.x specification forbids depth textures to be filtered.
-            if (UTILS_UNLIKELY(isDepthFormat(t->format)
-                               && params.compareMode == SamplerCompareMode::NONE
-                               && params.filterMag != SamplerMagFilter::NEAREST
-                               && params.filterMin != SamplerMinFilter::NEAREST
-                               && params.filterMin != SamplerMinFilter::NEAREST_MIPMAP_NEAREST)) {
-                params.filterMag = SamplerMagFilter::NEAREST;
-                params.filterMin = SamplerMinFilter::NEAREST;
-#ifndef NDEBUG
-                slog.w << "HwSamplerGroup specifies a filtered depth texture, which is not allowed."
-                       << io::endl;
-#endif
-            }
-#if defined(GL_EXT_texture_filter_anisotropic)
-            if (UTILS_UNLIKELY(anisotropyWorkaround)) {
-                // Driver claims to support anisotropic filtering, but it fails when set on
-                // the sampler, we have to set it on the texture instead.
-                // The texture is already bound here.
-                GLfloat const anisotropy = float(1u << params.anisotropyLog2);
-                glTexParameterf(t->gl.target, GL_TEXTURE_MAX_ANISOTROPY_EXT,
-                        std::min(context.gets.max_anisotropy, anisotropy));
-            }
-#endif
-#ifndef FILAMENT_SILENCE_NOT_SUPPORTED_BY_ES2
-            if (UTILS_LIKELY(!es2)) {
-                samplerId = mContext.getSampler(params);
-            } else
-#endif
-            {
-                // in ES2 the sampler parameters need to be set on the texture itself
-                glTexParameteri(t->gl.target, GL_TEXTURE_MIN_FILTER,
-                        (GLint)getTextureFilter(params.filterMin));
-                glTexParameteri(t->gl.target, GL_TEXTURE_MAG_FILTER,
-                        (GLint)getTextureFilter(params.filterMag));
-                glTexParameteri(t->gl.target, GL_TEXTURE_WRAP_S,
-                        (GLint)getWrapMode(params.wrapS));
-                glTexParameteri(t->gl.target, GL_TEXTURE_WRAP_T,
-                        (GLint)getWrapMode(params.wrapT));
-            }
-        } else {
-            // this happens if the program doesn't use all samplers of a sampler group,
-            // which is not an error.
-        }
-
-        sb->textureUnitEntries[i] = { t, samplerId };
-    }
-    scheduleDestroy(std::move(data));
+void OpenGLDriver::updateSamplerGroup(Handle<HwSamplerGroup> sbh, BufferDescriptor&& data) {
+    // TODO: goes away
 }
 
 void OpenGLDriver::setMinMaxLevels(Handle<HwTexture> th, uint32_t minLevel, uint32_t maxLevel) {
@@ -3068,47 +2998,16 @@ void OpenGLDriver::setScissor(Viewport const& scissor) noexcept {
 // ------------------------------------------------------------------------------------------------
 
 void OpenGLDriver::bindUniformBuffer(uint32_t index, Handle<HwBufferObject> ubh) {
-    DEBUG_MARKER()
-    GLBufferObject* ub = handle_cast<GLBufferObject *>(ubh);
-    assert_invariant(ub->bindingType == BufferObjectBinding::UNIFORM);
-    bindBufferRange(BufferObjectBinding::UNIFORM, index, ubh, 0, ub->byteCount);
+    // TODO: goes away
 }
 
 void OpenGLDriver::bindBufferRange(BufferObjectBinding bindingType, uint32_t index,
         Handle<HwBufferObject> ubh, uint32_t offset, uint32_t size) {
-    DEBUG_MARKER()
-    auto& gl = mContext;
-
-    assert_invariant(bindingType == BufferObjectBinding::SHADER_STORAGE ||
-                     bindingType == BufferObjectBinding::UNIFORM);
-
-    GLBufferObject* ub = handle_cast<GLBufferObject *>(ubh);
-
-    assert_invariant(offset + size <= ub->byteCount);
-
-    if (UTILS_UNLIKELY(ub->bindingType == BufferObjectBinding::UNIFORM && gl.isES2())) {
-        gl.setEs2UniformBinding(index,
-                ub->gl.id,
-                static_cast<uint8_t const*>(ub->gl.buffer) + offset,
-                ub->age);
-    } else {
-        GLenum const target = GLUtils::getBufferBindingType(bindingType);
-
-        assert_invariant(bindingType == BufferObjectBinding::SHADER_STORAGE ||
-                         ub->gl.binding == target);
-
-        gl.bindBufferRange(target, GLuint(index), ub->gl.id, offset, size);
-    }
-
-    CHECK_GL_ERROR(utils::slog.e)
+    // TODO: goes away
 }
 
 void OpenGLDriver::bindSamplers(uint32_t index, Handle<HwSamplerGroup> sbh) {
-    DEBUG_MARKER()
-    assert_invariant(index < Program::SAMPLER_BINDING_COUNT);
-    GLSamplerGroup* sb = handle_cast<GLSamplerGroup *>(sbh);
-    mSamplerBindings[index] = sb;
-    CHECK_GL_ERROR(utils::slog.e)
+    // TODO: goes away
 }
 
 void OpenGLDriver::insertEventMarker(char const* string, uint32_t len) {
@@ -3476,6 +3375,9 @@ void OpenGLDriver::updateDescriptorSetBuffer(
         backend::descriptor_binding_t binding,
         backend::BufferObjectHandle boh,
         uint32_t offset, uint32_t size) {
+    GLDescriptorSet* ds = handle_cast<GLDescriptorSet*>(dsh);
+    GLBufferObject* bo = handle_cast<GLBufferObject*>(boh);
+    ds->update(mContext, binding, bo, offset, size);
 }
 
 void OpenGLDriver::updateDescriptorSetTexture(
@@ -3483,6 +3385,9 @@ void OpenGLDriver::updateDescriptorSetTexture(
         backend::descriptor_binding_t binding,
         backend::TextureHandle th,
         SamplerParams params) {
+    GLDescriptorSet* ds = handle_cast<GLDescriptorSet*>(dsh);
+    GLTexture* t = handle_cast<GLTexture*>(th);
+    ds->update(mContext, binding, t, params);
 }
 
 void OpenGLDriver::flush(int) {
@@ -3868,12 +3773,40 @@ void OpenGLDriver::bindDescriptorSet(
         backend::DescriptorSetHandle dsh,
         backend::descriptor_set_t set,
         utils::FixedCapacityVector<uint32_t>&& offsets) {
+    // handle_cast<> here serves to validate the handle (it actually cannot return nullptr)
+    if (handle_cast<GLDescriptorSet*>(dsh)) {
+        assert_invariant(set < MAX_DESCRIPTOR_SET_COUNT);
+        if (!offsets.empty() || mBoundDescriptorSets[set].dsh != dsh) {
+            // if we reset offsets or the descriptor itself changed, we mark this descriptor binding
+            // invalid -- it will be re-bound at the next draw.
+            mRebindDescriptorSets.set(set, true);
+        }
+        mBoundDescriptorSets[set] = { dsh, std::move(offsets) };
+    }
 }
 
 void OpenGLDriver::draw2(uint32_t indexOffset, uint32_t indexCount, uint32_t instanceCount) {
     GLRenderPrimitive const* const rp = mBoundRenderPrimitive;
     if (UTILS_UNLIKELY(!rp || !mValidProgram)) {
         return;
+    }
+
+    // when the program changes, we might have to rebind all descriptors
+    if (UTILS_UNLIKELY(mRebindDescriptorSets.any())) {
+        mRebindDescriptorSets.forEachSetBit([this,
+                &boundDescriptorSets = mBoundDescriptorSets,
+                &context = mContext,
+                boundProgram = mBoundProgram](size_t set) {
+            assert_invariant(set < MAX_DESCRIPTOR_SET_COUNT);
+            auto const& entry = boundDescriptorSets[set];
+            if (entry.dsh) {
+                GLDescriptorSet* const ds = handle_cast<GLDescriptorSet*>(entry.dsh);
+                ds->bind(context, boundProgram, set, entry.offsets.data());
+            } else {
+                // TODO: we should probably unbind all the descriptors
+            }
+        });
+        mRebindDescriptorSets.clear();
     }
 
     if (UTILS_LIKELY(instanceCount <= 1)) {

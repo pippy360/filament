@@ -22,6 +22,7 @@
 
 #include "FilamentAPI-impl.h"
 
+#include <private/filament/DescriptorSets.h>
 #include <private/filament/EngineEnums.h>
 #include <private/filament/SamplerInterfaceBlock.h>
 #include <private/filament/BufferInterfaceBlock.h>
@@ -288,6 +289,7 @@ FMaterial::FMaterial(FEngine& engine, const Material::Builder& builder,
     processBlendingMode(parser);
     processSpecializationConstants(engine, builder, parser);
     processDepthVariants(engine, parser);
+    processDescriptorSets(engine);
 
     // we can only initialize the default instance once we're initialized ourselves
     mDefaultInstance.initDefaultInstance(engine, this);
@@ -362,6 +364,8 @@ void FMaterial::terminate(FEngine& engine) {
 
     destroyPrograms(engine);
     mDefaultInstance.terminate(engine);
+
+    engine.getDriverApi().destroyDescriptorSetLayout(mDescriptorSetLayoutHandle);
 }
 
 void FMaterial::compile(CompilerPriorityQueue priority,
@@ -560,6 +564,7 @@ Program FMaterial::getProgramWithVariants(
         program.attributes(mAttributeInfo);
     }
 
+    program.descriptorBindings(mProgramDescriptorBindings);
     program.specializationConstants(mSpecializationConstants);
 
     program.cacheId(utils::hash::combine(size_t(mCacheId), variant.key));
@@ -928,6 +933,55 @@ void FMaterial::processDepthVariants(FEngine& engine, MaterialParser const* cons
             }
         }
     }
+}
+
+void FMaterial::processDescriptorSets(FEngine& engine) {
+    // the PER_MATERIAL layout needs to be reflected from the Material
+    auto const& info = mSamplerGroupBindingInfoList[+SamplerBindingPoints::PER_MATERIAL_INSTANCE];
+
+    // FIXME: this should be all retrieved by reflection from the material
+
+    size_t size = 0;
+    for (auto id: {
+            descriptor_sets::DescriptorSet::PER_VIEW,
+            descriptor_sets::DescriptorSet::PER_RENDERABLE,
+            descriptor_sets::DescriptorSet::PER_MATERIAL}) {
+        auto const& dsl = descriptor_sets::getLayout(id);
+        size += dsl.bindings.size();
+    }
+
+    auto descriptorBindings = utils::FixedCapacityVector<Program::Descriptor>::with_capacity(size);
+    UTILS_NOUNROLL
+    for (auto id: {
+            descriptor_sets::DescriptorSet::PER_VIEW,
+            descriptor_sets::DescriptorSet::PER_RENDERABLE,
+            descriptor_sets::DescriptorSet::PER_MATERIAL}) {
+        uint8_t const set = descriptor_sets::getIndex(id);
+        auto const& dsl = descriptor_sets::getLayout(id);
+        for (auto const& entry: dsl.bindings) {
+            utils::CString name;
+            if (id == descriptor_sets::DescriptorSet::PER_MATERIAL) {
+                if (entry.binding == 0) {
+                    name = descriptor_sets::getDescriptorName(set, entry.binding);
+                } else {
+                    size_t sibIndex = entry.binding - 1;
+                    if (sibIndex < info.count) {
+                        name = mSamplerBindingToNameMap[info.bindingOffset + sibIndex];
+                    }
+                }
+            } else {
+                name = descriptor_sets::getDescriptorName(set, entry.binding);
+            }
+            descriptorBindings.push_back({ name, entry.type, set, entry.binding });
+        }
+    }
+
+    mProgramDescriptorBindings = std::move(descriptorBindings);
+
+    backend::DescriptorSetLayout descriptorSetLayout =
+            descriptor_sets::getLayout(descriptor_sets::DescriptorSet::PER_MATERIAL);
+    mDescriptorSetLayoutHandle =
+            engine.getDriverApi().createDescriptorSetLayout(std::move(descriptorSetLayout));
 }
 
 template bool FMaterial::setConstant<int32_t>(uint32_t id, int32_t value) noexcept;

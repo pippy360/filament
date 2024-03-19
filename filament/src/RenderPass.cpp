@@ -848,6 +848,10 @@ void RenderPass::Executor::execute(FEngine& engine,
     SYSTRACE_CONTEXT();
 
     DriverApi& driver = engine.getDriverApi();
+
+    // TODO: this can be bounds much earlier, probably by the engine itself
+//    driver.bindDescriptorSet(perViewDescriptorSet, 0);
+
     size_t const capacity = engine.getMinCommandBufferSize();
     CircularBuffer const& circularBuffer = driver.getCircularBuffer();
 
@@ -866,9 +870,11 @@ void RenderPass::Executor::execute(FEngine& engine,
                 .polygonOffset = mPolygonOffset,
         };
 
+        pipeline.pipelineLayout.setLayout[0] = engine.getPerViewDescriptorSetLayout();
+        pipeline.pipelineLayout.setLayout[1] = engine.getPerRenerableDescriptorSetLayout();
+
         PipelineState currentPipeline{};
         Handle<HwRenderPrimitive> currentPrimitiveHandle{};
-        bool rebindPipeline = true;
 
         FMaterialInstance const* UTILS_RESTRICT mi = nullptr;
         FMaterial const* UTILS_RESTRICT ma = nullptr;
@@ -945,88 +951,87 @@ void RenderPass::Executor::execute(FEngine& engine,
                        pipeline.polygonOffset = mi->getPolygonOffset();
                    }
                     pipeline.stencilState = mi->getStencilState();
-                    mi->use(driver);
 
-                    // FIXME: MaterialInstance changed (not necessarily the program though),
-                    //  however, texture bindings may have changed and currently we need to
-                    //  rebind the pipeline when that happens.
-                    rebindPipeline = true;
+                   // Each Material potentially has its own descriptor set layout. However,
+                   // in the current implementation, they're all the same.
+                    pipeline.pipelineLayout.setLayout[2] = ma->getDescriptorSetLayout();
+
+                    // Each MaterialInstance has its own descriptor set. This binds it.
+                    mi->use(driver);
                 }
 
                 assert_invariant(ma);
                 pipeline.program = ma->getProgram(info.materialVariant);
 
+                // TODO: all the section below is about setting up the per-renderable descriptor
+                //  we need to find a strategy. Probably the best solution would be for the
+                //  descriptor to already be ready, probably using a cache.
+
                 uint16_t const instanceCount =
                         info.instanceCount & PrimitiveInfo::INSTANCE_COUNT_MASK;
-                auto getPerObjectUboHandle =
-                        [this, &info, &instanceCount]() -> std::pair<Handle<backend::HwBufferObject>, uint32_t> {
-                            if (info.instanceBufferHandle) {
-                                // "hybrid" instancing -- instanceBufferHandle takes the place of the UBO
-                                return { info.instanceBufferHandle, 0 };
-                            }
-                            bool const userInstancing =
-                                    (info.instanceCount & PrimitiveInfo::USER_INSTANCE_MASK) != 0u;
-                            if (!userInstancing && instanceCount > 1) {
-                                // automatic instancing
-                                return {
-                                        mInstancedUboHandle,
-                                        info.index * sizeof(PerRenderableData) };
-                            } else {
-                                // manual instancing
-                                return { mUboHandle, info.index * sizeof(PerRenderableData) };
-                            }
-                        };
+//                auto getPerObjectUboHandle =
+//                        [this, &info, &instanceCount]() -> std::pair<Handle<backend::HwBufferObject>, uint32_t> {
+//                            if (info.instanceBufferHandle) {
+//                                // "hybrid" instancing -- instanceBufferHandle takes the place of the UBO
+//                                return { info.instanceBufferHandle, 0 };
+//                            }
+//                            bool const userInstancing =
+//                                    (info.instanceCount & PrimitiveInfo::USER_INSTANCE_MASK) != 0u;
+//                            if (!userInstancing && instanceCount > 1) {
+//                                // automatic instancing
+//                                return {
+//                                        mInstancedUboHandle,
+//                                        info.index * sizeof(PerRenderableData) };
+//                            } else {
+//                                // manual instancing
+//                                return { mUboHandle, info.index * sizeof(PerRenderableData) };
+//                            }
+//                        };
+//
+//                // Bind per-renderable uniform block. There is no need to attempt to skip this command
+//                // because the backends already do this.
+//                auto const [perObjectUboHandle, offset] = getPerObjectUboHandle();
+//                assert_invariant(perObjectUboHandle);
+//                driver.bindBufferRange(BufferObjectBinding::UNIFORM,
+//                        +UniformBindingPoints::PER_RENDERABLE,
+//                        perObjectUboHandle,
+//                        offset,
+//                        sizeof(PerRenderableUib));
+//
+//                if (UTILS_UNLIKELY(info.skinningHandle)) {
+//                    // note: we can't bind less than sizeof(PerRenderableBoneUib) due to glsl limitations
+//                    driver.bindBufferRange(BufferObjectBinding::UNIFORM,
+//                            +UniformBindingPoints::PER_RENDERABLE_BONES,
+//                            info.skinningHandle,
+//                            info.skinningOffset * sizeof(PerRenderableBoneUib::BoneData),
+//                            sizeof(PerRenderableBoneUib));
+//                    // note: always bind the skinningTexture because the shader needs it.
+//                    driver.bindSamplers(+SamplerBindingPoints::PER_RENDERABLE_SKINNING,
+//                            info.skinningTexture);
+//                    // note: even if only skinning is enabled, binding morphTargetBuffer is needed.
+//                    driver.bindSamplers(+SamplerBindingPoints::PER_RENDERABLE_MORPHING,
+//                            info.morphTargetBuffer);
+//                }
+//
+//                if (UTILS_UNLIKELY(info.morphWeightBuffer)) {
+//                    // Instead of using a UBO per primitive, we could also have a single UBO for all
+//                    // primitives and use bindUniformBufferRange which might be more efficient.
+//                    driver.bindUniformBuffer(+UniformBindingPoints::PER_RENDERABLE_MORPHING,
+//                            info.morphWeightBuffer);
+//                    driver.bindSamplers(+SamplerBindingPoints::PER_RENDERABLE_MORPHING,
+//                            info.morphTargetBuffer);
+//                    // note: even if only morphing is enabled, binding skinningTexture is needed.
+//                    driver.bindSamplers(+SamplerBindingPoints::PER_RENDERABLE_SKINNING,
+//                            info.skinningTexture);
+//                }
 
-                // Bind per-renderable uniform block. There is no need to attempt to skip this command
-                // because the backends already do this.
-                auto const [perObjectUboHandle, offset] = getPerObjectUboHandle();
-                assert_invariant(perObjectUboHandle);
-                driver.bindBufferRange(BufferObjectBinding::UNIFORM,
-                        +UniformBindingPoints::PER_RENDERABLE,
-                        perObjectUboHandle,
-                        offset,
-                        sizeof(PerRenderableUib));
+                // TODO: ideally all the above is replaced by this call
+                // driver.bindDescriptorSetOffsets(info.descriptorSet, 1, info.offsets);
 
-                if (UTILS_UNLIKELY(info.skinningHandle)) {
-                    // note: we can't bind less than sizeof(PerRenderableBoneUib) due to glsl limitations
-                    driver.bindBufferRange(BufferObjectBinding::UNIFORM,
-                            +UniformBindingPoints::PER_RENDERABLE_BONES,
-                            info.skinningHandle,
-                            info.skinningOffset * sizeof(PerRenderableBoneUib::BoneData),
-                            sizeof(PerRenderableBoneUib));
-                    // note: always bind the skinningTexture because the shader needs it.
-                    driver.bindSamplers(+SamplerBindingPoints::PER_RENDERABLE_SKINNING,
-                            info.skinningTexture);
-                    // note: even if only skinning is enabled, binding morphTargetBuffer is needed.
-                    driver.bindSamplers(+SamplerBindingPoints::PER_RENDERABLE_MORPHING,
-                            info.morphTargetBuffer);
 
-                    // FIXME: Currently we need to rebind the PipelineState when texture or
-                    //  UBO binding change.
-                    rebindPipeline = true;
-                }
-
-                if (UTILS_UNLIKELY(info.morphWeightBuffer)) {
-                    // Instead of using a UBO per primitive, we could also have a single UBO for all
-                    // primitives and use bindUniformBufferRange which might be more efficient.
-                    driver.bindUniformBuffer(+UniformBindingPoints::PER_RENDERABLE_MORPHING,
-                            info.morphWeightBuffer);
-                    driver.bindSamplers(+SamplerBindingPoints::PER_RENDERABLE_MORPHING,
-                            info.morphTargetBuffer);
-                    // note: even if only morphing is enabled, binding skinningTexture is needed.
-                    driver.bindSamplers(+SamplerBindingPoints::PER_RENDERABLE_SKINNING,
-                            info.skinningTexture);
-
-                    // FIXME: Currently we need to rebind the PipelineState when texture or
-                    //  UBO binding change.
-                    rebindPipeline = true;
-                }
-
-                if (rebindPipeline ||
-                        (memcmp(&pipeline,  &currentPipeline, sizeof(PipelineState)) != 0)) {
-                    rebindPipeline = false;
-                    currentPipeline = pipeline;
+                if (memcmp(&pipeline,  &currentPipeline, sizeof(PipelineState)) != 0) {
                     driver.bindPipeline(pipeline);
+                    currentPipeline = pipeline;
                 }
 
                 if (info.primitive->getHwHandle() != currentPrimitiveHandle) {

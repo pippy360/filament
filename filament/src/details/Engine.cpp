@@ -38,6 +38,8 @@
 
 #include <filament/MaterialEnums.h>
 
+#include <private/filament/DescriptorSets.h>
+
 #include <private/backend/PlatformFactory.h>
 
 #include <backend/DriverEnums.h>
@@ -338,6 +340,17 @@ void FEngine::init() {
     driverApi.update3DImage(mDummyZeroTexture, 0, 0, 0, 0, 1, 1, 1,
             { zeroes, 4, Texture::Format::RGBA, Texture::Type::UBYTE });
 
+
+    backend::DescriptorSetLayout perViewDsl{
+        descriptor_sets::getLayout(descriptor_sets::DescriptorSet::PER_VIEW) };
+
+    backend::DescriptorSetLayout perRenderableDsl{
+        descriptor_sets::getLayout(descriptor_sets::DescriptorSet::PER_RENDERABLE) };
+
+    mPerViewDslh = driverApi.createDescriptorSetLayout(std::move(perViewDsl));
+
+    mPerRenderableDslh = driverApi.createDescriptorSetLayout(std::move(perRenderableDsl));
+
 #ifdef FILAMENT_ENABLE_FEATURE_LEVEL_0
     if (UTILS_UNLIKELY(mActiveFeatureLevel == FeatureLevel::FEATURE_LEVEL_0)) {
         FMaterial::DefaultMaterialBuilder defaultMaterialBuilder;
@@ -461,7 +474,10 @@ void FEngine::shutdown() {
     mLightManager.terminate();              // free-up all lights
     mCameraManager.terminate(*this);        // free-up all cameras
 
+    driver.destroyDescriptorSetLayout(mPerViewDslh);
+    driver.destroyDescriptorSetLayout(mPerRenderableDslh);
     driver.destroyRenderPrimitive(mFullScreenTriangleRph);
+
     destroy(mFullScreenTriangleIb);
     destroy(mFullScreenTriangleVb);
     destroy(mDummyMorphTargetBuffer);

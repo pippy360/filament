@@ -69,9 +69,13 @@ set(PRIVATE_HDRS
 if (FILAMENT_SUPPORTS_OPENGL AND NOT FILAMENT_USE_EXTERNAL_GLES3 AND NOT FILAMENT_USE_SWIFTSHADER)
     list(APPEND SRCS
             include/backend/platforms/OpenGLPlatform.h
+            src/opengl/BindingMap.h
             src/opengl/gl_headers.cpp
             src/opengl/gl_headers.h
             src/opengl/GLBufferObject.h
+            src/opengl/GLDescriptorSet.cpp
+            src/opengl/GLDescriptorSet.h
+            src/opengl/GLDescriptorSetLayout.h
             src/opengl/GLTexture.h
             src/opengl/GLUtils.cpp
             src/opengl/GLUtils.h

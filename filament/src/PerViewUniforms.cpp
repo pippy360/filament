@@ -447,6 +447,7 @@ void PerViewUniforms::commit(backend::DriverApi& driver) noexcept {
     if (mUniforms.isDirty()) {
         driver.updateBufferObject(mUniformBufferHandle, mUniforms.toBufferDescriptor(driver), 0);
     }
+    // TODO: maybe that would also be here where we would update the descriptor set if needed
     if (mSamplers.isDirty()) {
         driver.updateSamplerGroup(mSamplerGroupHandle, mSamplers.toBufferDescriptor(driver));
     }
@@ -455,9 +456,13 @@ void PerViewUniforms::commit(backend::DriverApi& driver) noexcept {
 void PerViewUniforms::bind(backend::DriverApi& driver) noexcept {
     driver.bindUniformBuffer(+UniformBindingPoints::PER_VIEW, mUniformBufferHandle);
     driver.bindSamplers(+SamplerBindingPoints::PER_VIEW, mSamplerGroupHandle);
+
+    // TODO: this is where we would bind the per-view descriptor
+//    driver.bindDescriptorSet(perViewDescriptorSetHandle, 0, {});
 }
 
 void PerViewUniforms::unbindSamplers() noexcept {
+    // TODO: maybe here we would unbind the descriptor set?
     auto& samplerGroup = mSamplers;
     samplerGroup.clearSampler(PerViewSib::SSAO);
     samplerGroup.clearSampler(PerViewSib::SSR);

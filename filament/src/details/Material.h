@@ -86,6 +86,10 @@ public:
         return mSamplerInterfaceBlock;
     }
 
+    backend::Handle<backend::HwDescriptorSetLayout> getDescriptorSetLayout() const noexcept {
+        return mDescriptorSetLayoutHandle;
+    }
+
     void compile(CompilerPriorityQueue priority,
             UserVariantFilterMask variantFilter,
             backend::CallbackHandler* handler,
@@ -245,10 +249,14 @@ private:
 
     void processDepthVariants(FEngine& engine, MaterialParser const* const parser);
 
+    void processDescriptorSets(FEngine& engine);
+
     void createAndCacheProgram(backend::Program&& p, Variant variant) const noexcept;
 
     // try to order by frequency of use
     mutable std::array<backend::Handle<backend::HwProgram>, VARIANT_COUNT> mCachedPrograms;
+    backend::Handle<backend::HwDescriptorSetLayout> mDescriptorSetLayoutHandle;
+    utils::FixedCapacityVector<backend::Program::Descriptor> mProgramDescriptorBindings;
 
     backend::RasterState mRasterState;
     TransparencyMode mTransparencyMode = TransparencyMode::DEFAULT;

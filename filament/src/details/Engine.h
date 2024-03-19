@@ -412,6 +412,14 @@ public:
         return mHwVertexBufferInfoFactory;
     }
 
+    backend::Handle<backend::HwDescriptorSetLayout> getPerViewDescriptorSetLayout() const noexcept {
+        return mPerViewDslh;
+    }
+
+    backend::Handle<backend::HwDescriptorSetLayout> getPerRenerableDescriptorSetLayout() const noexcept {
+        return mPerRenderableDslh;
+    }
+
     backend::Handle<backend::HwTexture> getOneTexture() const { return mDummyOneTexture; }
     backend::Handle<backend::HwTexture> getZeroTexture() const { return mDummyZeroTexture; }
     backend::Handle<backend::HwTexture> getOneTextureArray() const { return mDummyOneTextureArray; }
@@ -481,6 +489,9 @@ private:
     FCameraManager mCameraManager;
     ResourceAllocator* mResourceAllocator = nullptr;
     HwVertexBufferInfoFactory mHwVertexBufferInfoFactory;
+    backend::Handle<backend::HwDescriptorSetLayout> mPerViewDslh;
+    backend::Handle<backend::HwDescriptorSetLayout> mPerRenderableDslh;
+
 
     ResourceList<FBufferObject> mBufferObjects{ "BufferObject" };
     ResourceList<FRenderer> mRenderers{ "Renderer" };

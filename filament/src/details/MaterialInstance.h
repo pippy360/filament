@@ -61,6 +61,8 @@ public:
         if (mSbHandle) {
             driver.bindSamplers(+SamplerBindingPoints::PER_MATERIAL_INSTANCE, mSbHandle);
         }
+
+        //driver.bindDescriptorSet(mDescriptorSetHandle, 2, {});
     }
 
     FMaterial const* getMaterial() const noexcept { return mMaterial; }
@@ -241,6 +243,7 @@ private:
 
     backend::Handle<backend::HwBufferObject> mUbHandle;
     backend::Handle<backend::HwSamplerGroup> mSbHandle;
+    backend::Handle<backend::HwDescriptorSet> mDescriptorSetHandle;
     UniformBuffer mUniforms;
     backend::SamplerGroup mSamplers;
 

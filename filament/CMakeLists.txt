@@ -142,6 +142,7 @@ set(PRIVATE_HDRS
         src/BufferPoolAllocator.h
         src/ColorSpaceUtils.h
         src/Culler.h
+        src/DescriptorSetLayout.h
         src/DFG.h
         src/FilamentAPI-impl.h
         src/FrameHistory.h
